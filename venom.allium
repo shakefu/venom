@@ -1,0 +1,302 @@
+-- allium: 3
+-- venom.allium
+
+-- Scope: Venom CLI framework — declarative CLI generation from annotated Go functions
+-- Includes: Function/parameter metadata, naming derivation, annotation parsing,
+--           command tree construction, configuration resolution, code generation
+-- Excludes:
+--   - AST parsing mechanics (Go compiler tooling)
+--   - Reflection-based invocation (runtime implementation)
+--   - Cobra/Viper/Fang internals (third-party libraries)
+--   - File I/O, code formatting (infrastructure)
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum ParamType {
+    string | int | int64 | float64 | bool | string_slice | duration
+}
+
+-- Annotation tags are a closed set: cmd, short, default, desc, required
+-- They appear as literals in rule comparisons (e.g. a.tag = cmd)
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity App {
+    name: String                         -- derived from binary name or explicit
+    version: String?
+    env_prefix: String                   -- derived from name or explicit
+    config_name: String                  -- defaults to "." + name
+    config_paths: List<String>            -- defaults to {".", "$HOME"}
+
+    commands: Command with app = this
+
+    -- Built-in capabilities provided for every app:
+    --   Shell completions (bash, zsh, fish, powershell)
+    --   Man page generation
+    --   Styled help output with usage, flags, and subcommand summaries
+}
+
+entity Command {
+    app: App
+    path: List<String>                   -- e.g. ["serve", "tls"] for nested commands
+    description: String?                 -- from @cmd annotation
+    has_function: Boolean                -- true if a function is registered for this path
+    params: Param with command = this
+    children: Command with app = app      -- direct child commands (path extends this by one segment)
+        where is_direct_child(path, this.path)
+
+    -- Derived
+    full_path: app.name + " " + join(path, " ")
+    is_group: children.count > 0         -- has subcommands
+    is_executable: has_function           -- registered functions are always executable
+}
+
+entity Param {
+    command: Command
+    name: String                         -- Go parameter name
+    type: ParamType
+    flag_name: String                    -- derived kebab-case name
+    short: String?                       -- single character, from @short
+    default_value: String?               -- from @default
+    description: String?                 -- from @desc
+    required: Boolean                    -- from @required, default false
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    default_config_paths: Set<String> = {".", "$HOME"}
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- Naming derivation: function name to command path
+
+rule DeriveCommandPath {
+    -- A Go function name is transformed into a command path.
+    -- Underscores split into subcommand segments.
+    -- camelCase within a segment becomes kebab-case.
+    -- Package prefix is stripped.
+
+    when: FunctionRegistered(full_name, annotations)
+
+    -- full_name is e.g. "main.serve_tls" or "main.initProject"
+    let base_name = strip_package_prefix(full_name)
+    let segments = split_on_underscores(base_name)
+    let path = segments.map(s => to_kebab_case(s))
+
+    let cmd_annotation = annotations.find(a => a.tag = cmd)
+
+    ensures: Command.created(
+        path: path,
+        description: if cmd_annotation != null: cmd_annotation.value else: null
+    )
+}
+
+-- Naming derivation: parameter name to flag name
+
+rule DeriveParamFlag {
+    -- A Go parameter name (camelCase) becomes a kebab-case flag.
+    -- Examples:
+    --   port         => port
+    --   serverPort   => server-port
+    --   TLSConfig    => tls-config
+    --   useHTTPS     => use-https
+
+    when: ParameterRegistered(command, param_name, param_type, annotations)
+
+    requires: param_type != context          -- context.Context is never a flag
+
+    let flag_name = to_kebab_case(param_name)
+    let short = annotations.find(a => a.tag = short)
+    let default_val = annotations.find(a => a.tag = default)
+    let desc = annotations.find(a => a.tag = desc)
+    let is_required = annotations.any(a => a.tag = required)
+
+    ensures: Param.created(
+        command: command,
+        name: param_name,
+        type: param_type,
+        flag_name: flag_name,
+        short: if short != null: short.value else: null,
+        default_value: if default_val != null: default_val.value else: null,
+        description: if desc != null: desc.value else: null,
+        required: is_required
+    )
+}
+
+-- Configuration resolution priority
+
+rule ResolveParamValue {
+    -- When a command executes, each parameter's value is resolved
+    -- from the first available source in priority order:
+    --   1. Command-line flag (explicit)
+    --   2. Environment variable: ENV_PREFIX_FLAG_NAME
+    --      (flag hyphens become underscores, all uppercase)
+    --   3. Config file value (matched by flag name)
+    --   4. Default from @default annotation
+    --   5. Type zero value
+
+    when: CommandExecuted(command, flag_values, env_values, config_values)
+
+    ensures:
+        for p in command.params:
+            let env_key = to_env_key(command.app.env_prefix, p.flag_name)
+            p.resolved_value = first_of(
+                flag_values.get(p.flag_name),
+                env_values.get(env_key),
+                config_values.get(p.flag_name),
+                p.default_value,
+                zero_value(p.type)
+            )
+}
+
+-- Code generation
+
+rule GenerateRegistrations {
+    -- The code generator scans source files for venom.Execute(...) calls,
+    -- extracts function metadata from signatures and annotations,
+    -- and produces a venom_gen.go file with init() registrations.
+
+    when: GenerateRequested(directory)
+
+    -- Find all venom.Execute() calls in .go files (excluding tests and generated files)
+    let source_functions = scan_execute_calls(directory)
+
+    ensures:
+        for fn in source_functions:
+            FunctionRegistered(
+                full_name: fn.qualified_name,
+                annotations: fn.annotations
+            )
+    ensures: GeneratedFileWritten(
+        path: directory + "/venom_gen.go",
+        registrations: source_functions
+    )
+}
+
+-- Command tree construction
+
+rule BuildCommandTree {
+    -- Commands are organized into a tree based on their path segments.
+    -- Intermediate commands are auto-created as needed.
+    -- A command with a registered function is executable even if it has children.
+    -- Example: registering serve() and serve_tls() produces:
+    --   root -> serve (executable + group) -> tls (executable)
+
+    when: AppExecuted(app, functions)
+
+    ensures:
+        for fn in functions:
+            Command.created(
+                app: app,
+                path: fn.path,
+                has_function: true
+            )
+            -- intermediate path segments get auto-created group commands
+            for parent_path in ancestor_paths(fn.path):
+                if not exists Command{app: app, path: parent_path}:
+                    Command.created(
+                        app: app,
+                        path: parent_path,
+                        has_function: false
+                    )
+}
+
+-- Error handling and exit codes
+
+rule CommandSucceeds {
+    -- Command function returns nil error: exit code 0.
+
+    when: CommandCompleted(command, result)
+
+    requires: result.error = null
+
+    ensures: ProcessExit(code: 0)
+}
+
+rule CommandFailsWithCode {
+    -- Command function returns an error satisfying ErrorCode() int.
+    -- The error code becomes the process exit code.
+
+    when: CommandCompleted(command, result)
+
+    requires: result.error != null
+    requires: has_error_code(result.error)
+
+    ensures: ErrorPrinted(to: stderr, message: result.error.message)
+    ensures: ProcessExit(code: error_code(result.error))
+}
+
+rule CommandFailsDefault {
+    -- Command function returns an error without ErrorCode().
+    -- Default exit code 1.
+
+    when: CommandCompleted(command, result)
+
+    requires: result.error != null
+    requires: not has_error_code(result.error)
+
+    ensures: ErrorPrinted(to: stderr, message: result.error.message)
+    ensures: ProcessExit(code: 1)
+}
+
+-- Required flag validation
+
+rule ValidateRequiredFlags {
+    when: CommandExecuted(command, flag_values, env_values, config_values)
+
+    requires:
+        for p in command.params:
+            if p.required:
+                let env_key = to_env_key(command.app.env_prefix, p.flag_name)
+                flag_values.get(p.flag_name) != null
+                or env_values.get(env_key) != null
+                or config_values.get(p.flag_name) != null
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant UniqueShortFlags {
+    -- Within a command, no two parameters share the same short flag.
+    for command in Commands:
+        for p1 in command.params:
+            for p2 in command.params:
+                if p1 != p2 and p1.short != null:
+                    p1.short != p2.short
+}
+
+invariant UniqueFlagNames {
+    -- Within a command, no two parameters share the same flag name.
+    for command in Commands:
+        for p1 in command.params:
+            for p2 in command.params:
+                if p1 != p2:
+                    p1.flag_name != p2.flag_name
+}
+
+invariant ContextNeverAFlag {
+    -- context.Context parameters are always filtered out and never become flags.
+    for p in Params:
+        p.type != context
+}
+
+invariant ContextIsFirstParam {
+    -- Every command function must accept context.Context as its first parameter.
+    -- The framework injects the context at execution time; callers never supply it.
+    for command in Commands:
+        if command.has_function:
+            command.function.params[0].type = context
+}
+
+-- No open questions remain.

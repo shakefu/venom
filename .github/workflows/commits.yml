@@ -1,0 +1,20 @@
+name: Commits
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check conventional commits
+        uses: cocogitto/cocogitto-action@v3
+        with:
+          check-latest-tag-only: true

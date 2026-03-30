@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version
+        id: bump
+        uses: cocogitto/cocogitto-action@v3
+        with:
+          release: true
+          git-user: github-actions[bot]
+          git-user-email: github-actions[bot]@users.noreply.github.com
+
+      - name: Create GitHub release
+        if: steps.bump.outputs.version != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.version }}
+          generate_release_notes: true
