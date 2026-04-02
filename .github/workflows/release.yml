@@ -23,10 +23,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          STATUS=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs \
-            --jq '[.check_runs[]
+          CHECK_RUNS_JSON=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs")
+
+          STATUS=$(echo "$CHECK_RUNS_JSON" | jq -c '
+            [.check_runs[]
               | select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit")
-              | .conclusion // "pending"] | group_by(.) | map({(.[0]): length}) | add')
+              | .conclusion // "pending"]
+            | group_by(.) | map({(.[0]): length}) | add
+          ')
+
+          echo "gate debug: total_count=$(echo "$CHECK_RUNS_JSON" | jq '.total_count')"
+          echo "gate debug: check_runs in this response=$(echo "$CHECK_RUNS_JSON" | jq '.check_runs | length')"
+          if [ "$(echo "$CHECK_RUNS_JSON" | jq '.total_count')" != "$(echo "$CHECK_RUNS_JSON" | jq '.check_runs | length')" ]; then
+            echo "gate debug: WARNING total_count != page length; response may be paginated."
+          fi
+          echo "$CHECK_RUNS_JSON" | jq -c '
+            .check_runs[]
+            | select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit")
+            | {name, status, conclusion}
+          ' | sed 's/^/gate debug: /'
+          echo "gate debug: jq aggregate (gate value): $STATUS"
+          echo "gate debug: STATUS=$STATUS (expected {\"success\":3})"
+
           if [ "$STATUS" = '{"success":3}' ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
           else
