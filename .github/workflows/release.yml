@@ -74,7 +74,7 @@ jobs:
           command: bump
           git-user: github-actions[bot]
           git-user-email: github-actions[bot]@users.noreply.github.com
-          args: --ignore-merge-commits
+          args: --auto
 
       - name: Create GitHub release
         if: steps.bump.outputs.version != ''
