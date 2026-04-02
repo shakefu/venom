@@ -34,7 +34,7 @@ func initProject(
 
 // @cmd show version information
 func version(ctx context.Context) error {
-	fmt.Println("myapp v0.1.0")
+	fmt.Println("venom-example v0.1.0")
 	return nil
 }
 
@@ -48,11 +48,11 @@ That's it. No structs, no builders, no boilerplate. Run `venom generate` and you
 ![Venom styled help output](docs/venom-example.jpeg)
 
 ```
-$ myapp --help
+$ venom-example --help
 
   USAGE
 
-    myapp [command] [--flags]
+    venom-example [command] [--flags]
 
   COMMANDS
 
@@ -64,12 +64,12 @@ $ myapp --help
 
   FLAGS
 
-    -h --help               Help for myapp
-    -v --version            Version for myapp
+    -h --help               Help for venom-example
+    -v --version            Version for venom-example
 ```
 
 ```
-$ myapp serve -p 3000 --host 0.0.0.0
+$ venom-example serve -p 3000 --host 0.0.0.0
 Listening on 0.0.0.0:3000
 ```
 
@@ -110,8 +110,8 @@ Venom derives CLI names from Go names automatically:
 Flag values are resolved from multiple sources in priority order:
 
 1. **CLI flag** — `--port 3000`
-2. **Environment variable** — `MYAPP_PORT=3000`
-3. **Config file** — `.myapp` (YAML, TOML, or JSON)
+2. **Environment variable** — `VENOM_EXAMPLE_PORT=3000`
+3. **Config file** — `.venom-example` (YAML, TOML, or JSON)
 4. **Default** — `@default` annotation value
 5. **Zero value** — type default (`0`, `""`, `false`)
 
@@ -156,10 +156,10 @@ For more control, use `venom.New()`:
 
 ```go
 app := venom.New(
-	venom.WithName("myapp"),
+	venom.WithName("venom-example"),
 	venom.WithVersion("1.0.0"),
-	venom.WithEnvPrefix("MYAPP"),
-	venom.WithConfigName(".myapp"),
+	venom.WithEnvPrefix("VENOM_EXAMPLE"),
+	venom.WithConfigName(".venom-example"),
 	venom.WithConfigPaths(".", "$HOME"),
 )
 app.Execute(serve, initProject, version)
