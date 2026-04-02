@@ -13,6 +13,8 @@ import (
 	"github.com/shakefu/venom"
 )
 
+//go:generate venom generate
+
 // @cmd starts the HTTP server
 func serve(
 	ctx context.Context,
@@ -43,7 +45,7 @@ func main() {
 }
 ```
 
-That's it. No structs, no builders, no boilerplate. Run `venom generate` and you get:
+That's it. No structs, no builders, no boilerplate. Run `go generate` and you get:
 
 ![Venom styled help output](docs/venom-example.jpeg)
 
@@ -76,8 +78,9 @@ Listening on 0.0.0.0:3000
 ## How it works
 
 1. Write plain Go functions with annotations in comments
-2. Run `venom generate` to produce registration code
-3. Call `venom.Execute(...)` in main
+2. Add `//go:generate venom generate` to your package
+3. Run `go generate` to produce registration code
+4. Call `venom.Execute(...)` in main
 
 Functions become commands. Parameters become flags. Annotations control the CLI behavior:
 
@@ -142,10 +145,14 @@ go get github.com/shakefu/venom
 
 ## Usage
 
-Generate the registration code after adding or changing command functions:
+Add a `go:generate` directive to your package and run `go generate`:
+
+```go
+//go:generate venom generate
+```
 
 ```bash
-venom generate
+go generate ./...
 ```
 
 This produces a `venom_gen.go` file with `init()` registrations. Commit this file — it's part of your build.
