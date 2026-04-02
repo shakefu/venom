@@ -63,21 +63,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
       - name: Bump version
         id: bump
-        uses: cocogitto/cocogitto-action@v3
+        uses: cocogitto/cocogitto-action@9a9fe03b31c47444290c0d7f9b1ee1b44ee13f20 # v4.1.0
         with:
           release: true
           git-user: github-actions[bot]
           git-user-email: github-actions[bot]@users.noreply.github.com
+          args: --ignore-merge-commits
 
       - name: Create GitHub release
         if: steps.bump.outputs.version != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           tag_name: ${{ steps.bump.outputs.version }}
           generate_release_notes: true
