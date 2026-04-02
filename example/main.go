@@ -7,6 +7,8 @@ import (
 	"github.com/shakefu/venom"
 )
 
+//go:generate venom generate
+
 // @cmd starts the HTTP server
 func serve(
 	ctx context.Context,
