@@ -71,7 +71,7 @@ jobs:
         id: bump
         uses: cocogitto/cocogitto-action@9a9fe03b31c47444290c0d7f9b1ee1b44ee13f20 # v4.1.0
         with:
-          release: true
+          command: bump
           git-user: github-actions[bot]
           git-user-email: github-actions[bot]@users.noreply.github.com
           args: --ignore-merge-commits
