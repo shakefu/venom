@@ -34,16 +34,19 @@ jobs:
           fi
 
   lint:
+    name: Lint
     needs: gate
     if: needs.gate.outputs.passed != 'true'
     uses: ./.github/workflows/lint.yml
 
   commits:
+    name: Commits
     needs: gate
     if: needs.gate.outputs.passed != 'true'
     uses: ./.github/workflows/commits.yml
 
   test:
+    name: Test
     needs: gate
     if: needs.gate.outputs.passed != 'true'
     uses: ./.github/workflows/test.yml
