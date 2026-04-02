@@ -25,6 +25,19 @@ jobs:
         run: |
           CHECK_RUNS_JSON=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs")
 
+          echo "gate debug: raw GET .../commits/{sha}/check-runs (full JSON):"
+          echo "$CHECK_RUNS_JSON" | jq .
+
+          echo "gate debug: every check run on this page (name / status / conclusion):"
+          echo "$CHECK_RUNS_JSON" | jq -r '.check_runs[] | "- \(.name)\tstatus=\(.status)\tconclusion=\(.conclusion // "null")"'
+
+          if [ "$(echo "$CHECK_RUNS_JSON" | jq '.total_count')" != "$(echo "$CHECK_RUNS_JSON" | jq '.check_runs | length')" ]; then
+            echo "gate debug: WARNING total_count != check_runs length in this response; list may be paginated — fetch more pages before trusting the gate."
+          fi
+
+          echo "gate debug: runs whose names match the gate filter (Pre-commit, Commits, Unit):"
+          echo "$CHECK_RUNS_JSON" | jq '.check_runs | map(select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit"))'
+
           STATUS=$(echo "$CHECK_RUNS_JSON" | jq -c '
             [.check_runs[]
               | select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit")
@@ -32,18 +45,8 @@ jobs:
             | group_by(.) | map({(.[0]): length}) | add
           ')
 
-          echo "gate debug: total_count=$(echo "$CHECK_RUNS_JSON" | jq '.total_count')"
-          echo "gate debug: check_runs in this response=$(echo "$CHECK_RUNS_JSON" | jq '.check_runs | length')"
-          if [ "$(echo "$CHECK_RUNS_JSON" | jq '.total_count')" != "$(echo "$CHECK_RUNS_JSON" | jq '.check_runs | length')" ]; then
-            echo "gate debug: WARNING total_count != page length; response may be paginated."
-          fi
-          echo "$CHECK_RUNS_JSON" | jq -c '
-            .check_runs[]
-            | select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit")
-            | {name, status, conclusion}
-          ' | sed 's/^/gate debug: /'
-          echo "gate debug: jq aggregate (gate value): $STATUS"
-          echo "gate debug: STATUS=$STATUS (expected {\"success\":3})"
+          echo "gate debug: jq conclusion aggregate used for gate: ${STATUS:-<empty>}"
+          echo "gate debug: gate passes when that value is exactly {\"success\":3} (three matching runs, all success)."
 
           if [ "$STATUS" = '{"success":3}' ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
