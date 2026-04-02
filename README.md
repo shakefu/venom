@@ -2,8 +2,6 @@
 
 Declarative CLI generation for Go. Write functions, get commands.
 
-[![CI](https://github.com/shakefu/venom/actions/workflows/lint.yml/badge.svg)](https://github.com/shakefu/venom/actions/workflows/lint.yml)
-[![CI](https://github.com/shakefu/venom/actions/workflows/test.yml/badge.svg)](https://github.com/shakefu/venom/actions/workflows/test.yml)
 
 ```go
 package main
