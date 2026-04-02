@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+
+concurrency:
+  group: test-unit-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  unit:
+    name: Unit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

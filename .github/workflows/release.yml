@@ -4,11 +4,59 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
-  release:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Check CI status
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs \
+            --jq '[.check_runs[]
+              | select(.name == "Pre-commit" or .name == "Commits" or .name == "Unit")
+              | .conclusion] | group_by(.) | map({(.[0]): length}) | add')
+          if [ "$STATUS" = '{"success":3}' ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    needs: gate
+    if: needs.gate.outputs.passed != 'true'
+    uses: ./.github/workflows/lint.yml
+
+  commits:
+    needs: gate
+    if: needs.gate.outputs.passed != 'true'
+    uses: ./.github/workflows/commits.yml
+
+  test:
+    needs: gate
+    if: needs.gate.outputs.passed != 'true'
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    name: Publish
+    needs: [gate, lint, commits, test]
+    if: |
+      always() &&
+      (needs.gate.outputs.passed == 'true' ||
+       (needs.lint.result == 'success' &&
+        needs.commits.result == 'success' &&
+        needs.test.result == 'success'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

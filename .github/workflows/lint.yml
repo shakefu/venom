@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+
+concurrency:
+  group: lint-pre-commit-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint:
+  pre-commit:
+    name: Pre-commit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,8 +23,5 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install prek
-        run: pip install pre-commit
-
-      - name: Run pre-commit
-        run: pre-commit run --all-files
+      - name: Run prek
+        uses: j178/prek-action@v2

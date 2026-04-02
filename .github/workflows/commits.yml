@@ -1,12 +1,18 @@
-name: Commits
+name: Lint
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+
+concurrency:
+  group: lint-commits-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  check:
+  commits:
+    name: Commits
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
