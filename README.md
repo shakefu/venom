@@ -25,14 +25,48 @@ func serve(
 	return nil
 }
 
+// @cmd initialize a new project
+func initProject(
+	ctx context.Context,
+	dir string, // @default . @desc "directory to initialize"
+) error {
+	fmt.Printf("Initializing project in %s\n", dir)
+	return nil
+}
+
+// @cmd show version information
+func version(ctx context.Context) error {
+	fmt.Println("myapp v0.1.0")
+	return nil
+}
+
 func main() {
-	venom.Execute(serve)
+	venom.Execute(serve, initProject, version)
 }
 ```
 
 That's it. No structs, no builders, no boilerplate. Run `venom generate` and you get:
 
-![Venom styled help output](docs/venom-example.jpeg)
+```
+$ myapp --help
+
+  USAGE
+
+    myapp [command] [--flags]
+
+  COMMANDS
+
+    completion [command]    Generate the autocompletion script for the specified shell
+    help [command]          Help about any command
+    init-project [--flags]  Initialize a new project
+    serve [--flags]         Starts the HTTP server
+    version                 Show version information
+
+  FLAGS
+
+    -h --help               Help for myapp
+    -v --version            Version for myapp
+```
 
 ```
 $ myapp serve -p 3000 --host 0.0.0.0
