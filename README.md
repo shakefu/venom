@@ -45,6 +45,8 @@ func main() {
 
 That's it. No structs, no builders, no boilerplate. Run `venom generate` and you get:
 
+![Venom styled help output](docs/venom-example.jpeg)
+
 ```
 $ myapp --help
 
