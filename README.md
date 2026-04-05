@@ -259,52 +259,32 @@ app.Execute(serve, initProject, version)
 <!-- AI-GENERATED -->
 ## Troubleshooting
 
-### `venom: no metadata registered for main.serve; did you run go generate?`
+**`venom: no metadata registered for main.serve; did you run go generate?`**
+— The function was passed to `venom.Execute()` but has no entry in `venom_gen.go`. Run `go generate ./...` to regenerate registration code.
 
-The function was passed to `venom.Execute()` but has no entry in `venom_gen.go`.
-Run `go generate ./...` to regenerate registration code.
+**`venom: expected a function, got <type>`**
+— A non-function value was passed to `venom.Execute()`. Every argument must be a function, not a method value or a non-function type.
 
-### `venom: expected a function, got <type>`
+**`venom: <func>: positional args "<a>" and "<b>" share position <N>`**
+— Two `@arg` parameters have the same index in the function signature. Each positional argument must occupy a unique position.
 
-A non-function value was passed to `venom.Execute()`. Every argument must be a
-function, not a method value or a non-function type.
+**`venom: <func>: multiple variadic positional args: [...]`**
+— A command has more than one `[]string` parameter annotated with `@arg`. At most one variadic argument is allowed per command.
 
-### Panic: `venom: <func>: positional args "<a>" and "<b>" share position <N>`
+**`venom: <func>: required positional arg "<name>" follows an optional arg`**
+— Required `@arg @required` parameters must come before optional `@arg` parameters in the function signature.
 
-Two `@arg` parameters have the same index in the function signature. Each
-positional argument must occupy a unique position.
+**`venom: <func>: variadic arg "<name>" must be after all other positional args`**
+— The `[]string` variadic `@arg` parameter must be the last positional argument in the function signature.
 
-### Panic: `venom: <func>: multiple variadic positional args: [...]`
+**`venom: <func>: variadic positional arg "<name>" must have type []string, got "<type>"`**
+— Variadic positional arguments must be typed `[]string`. Other slice types are not supported.
 
-A command has more than one `[]string` parameter annotated with `@arg`. At most
-one variadic argument is allowed per command.
+**A parameter does not appear as a flag**
+— The parameter's Go type is not in the supported set (`string`, `int`, `int64`, `float64`, `bool`, `[]string`, `time.Duration`). Unsupported types are silently ignored. Use a supported type and parse inside the function body.
 
-### Panic: `venom: <func>: required positional arg "<name>" follows an optional arg`
-
-Required `@arg @required` parameters must come before optional `@arg` parameters
-in the function signature.
-
-### Panic: `venom: <func>: variadic arg "<name>" must be after all other positional args`
-
-The `[]string` variadic `@arg` parameter must be the last positional argument in
-the function signature.
-
-### Panic: `venom: <func>: variadic positional arg "<name>" must have type []string, got "<type>"`
-
-Variadic positional arguments must be typed `[]string`. Other slice types are not
-supported.
-
-### A parameter does not appear as a flag
-
-The parameter's Go type is not in the supported set (`string`, `int`, `int64`,
-`float64`, `bool`, `[]string`, `time.Duration`). Unsupported types are silently
-ignored. Use a supported type and parse inside the function body.
-
-### Duplicate short flag panic at startup
-
-Two parameters on the same command share the same `@short` letter. Cobra panics
-when duplicate shorthand flags are registered. Use unique `@short` values or
-remove the duplicate.
+**Duplicate short flag panic at startup**
+— Two parameters on the same command share the same `@short` letter. Cobra panics when duplicate shorthand flags are registered. Use unique `@short` values or remove the duplicate.
 <!-- /AI-GENERATED -->
 
 ## Contributing
