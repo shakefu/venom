@@ -32,6 +32,17 @@ func version(ctx context.Context) error {
 	return nil
 }
 
+// @cmd copy files to destination
+func copyFiles(
+	ctx context.Context,
+	src string, // @arg @required @desc "source path"
+	dst string, // @arg @desc "destination path"
+	extra []string, // @arg @desc "additional files"
+	verbose bool, // @short v @desc "enable verbose output"
+) error {
+	return nil
+}
+
 func main() {
-	venom.Execute(serve, initProject, version)
+	venom.Execute(serve, initProject, version, copyFiles)
 }

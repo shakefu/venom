@@ -24,6 +24,7 @@ type funcInfo struct {
 	CommandPath []string    // Derived command hierarchy
 	Description string      // From @cmd annotation on doc comment
 	Params      []paramInfo // Extracted parameters (excluding context.Context)
+	Args        []argInfo   // Positional arguments (from @arg annotation)
 }
 
 // paramInfo holds extracted metadata for a single function parameter.
@@ -35,6 +36,16 @@ type paramInfo struct {
 	Default  string
 	Desc     string
 	Required bool
+}
+
+// argInfo holds extracted metadata for a positional argument.
+type argInfo struct {
+	Name        string
+	Type        string
+	Position    int
+	Cardinality string // "required", "optional", "variadic"
+	Default     string
+	Desc        string
 }
 
 // Generate is the main entry point. It parses all .go files in dir (excluding
@@ -264,9 +275,9 @@ func extractFuncMeta(fset *token.FileSet, files []*ast.File, funcName string, pk
 				}
 			}
 
-			// Extract parameters, skipping context.Context.
+			// Extract parameters and positional args, skipping context.Context.
 			if fn.Type.Params != nil {
-				info.Params = extractParams(fset, file, fn)
+				extractFuncParams(fset, file, fn, info)
 			}
 
 			return info, nil
@@ -276,10 +287,11 @@ func extractFuncMeta(fset *token.FileSet, files []*ast.File, funcName string, pk
 	return nil, fmt.Errorf("gen: function %q not found in source files", funcName)
 }
 
-// extractParams extracts parameter info from a function declaration,
-// skipping context.Context parameters.
-func extractParams(fset *token.FileSet, file *ast.File, fn *ast.FuncDecl) []paramInfo {
-	var params []paramInfo
+// extractFuncParams extracts parameter and positional arg info from a function
+// declaration, populating info.Params and info.Args. context.Context parameters
+// are skipped.
+func extractFuncParams(fset *token.FileSet, file *ast.File, fn *ast.FuncDecl, info *funcInfo) {
+	argPos := 0
 
 	for _, field := range fn.Type.Params.List {
 		typeName := typeToString(field.Type)
@@ -289,17 +301,48 @@ func extractParams(fset *token.FileSet, file *ast.File, fn *ast.FuncDecl) []para
 			continue
 		}
 
-		for _, name := range field.Names {
-			p := paramInfo{
-				Name:     name.Name,
-				Type:     typeName,
-				FlagName: paramToFlagName(name.Name),
-			}
+		// Look for inline comment on the same line as this parameter.
+		comment := findParamComment(fset, file, field)
+		annotations := make(map[string]string)
+		if comment != "" {
+			annotations = parseAnnotations(comment)
+		}
 
-			// Look for inline comment on the same line as this parameter.
-			comment := findParamComment(fset, file, field)
-			if comment != "" {
-				annotations := parseAnnotations(comment)
+		for _, name := range field.Names {
+			if _, isArg := annotations["arg"]; isArg {
+				// Route to positional arg.
+				a := argInfo{
+					Name:     name.Name,
+					Type:     typeName,
+					Position: argPos,
+				}
+				argPos++
+
+				// Determine cardinality.
+				if strings.HasPrefix(typeName, "[]") {
+					a.Cardinality = "variadic"
+				} else if _, req := annotations["required"]; req {
+					a.Cardinality = "required"
+				} else {
+					a.Cardinality = "optional"
+				}
+
+				if v, ok := annotations["default"]; ok {
+					a.Default = v
+				}
+				if v, ok := annotations["desc"]; ok {
+					a.Desc = v
+				}
+
+				info.Args = append(info.Args, a)
+			} else {
+				// Route to flag param (existing logic).
+				p := paramInfo{
+					Name:     name.Name,
+					Type:     typeName,
+					FlagName: paramToFlagName(name.Name),
+				}
+
 				if v, ok := annotations["short"]; ok {
 					p.Short = v
 				}
@@ -312,13 +355,11 @@ func extractParams(fset *token.FileSet, file *ast.File, fn *ast.FuncDecl) []para
 				if _, ok := annotations["required"]; ok {
 					p.Required = true
 				}
-			}
 
-			params = append(params, p)
+				info.Params = append(info.Params, p)
+			}
 		}
 	}
-
-	return params
 }
 
 // findParamComment returns the inline comment text for a field, if any.
@@ -486,6 +527,29 @@ func writeGenFile(dir string, pkgName string, infos []*funcInfo) error {
 				}
 				if p.Required {
 					b.WriteString(", Required: true")
+				}
+				b.WriteString("},\n")
+			}
+			b.WriteString("\t\t},\n")
+		}
+
+		if len(info.Args) > 0 {
+			b.WriteString("\t\tPositionalArgs: []venom.PositionalArgMeta{\n")
+			for _, a := range info.Args {
+				cardConst := "venom.ArgOptional"
+				switch a.Cardinality {
+				case "required":
+					cardConst = "venom.ArgRequired"
+				case "variadic":
+					cardConst = "venom.ArgVariadic"
+				}
+				b.WriteString("\t\t\t{")
+				fmt.Fprintf(&b, "Name: %q, Type: %q, Position: %d, Cardinality: %s", a.Name, a.Type, a.Position, cardConst)
+				if a.Default != "" {
+					fmt.Fprintf(&b, ", Default: %q", a.Default)
+				}
+				if a.Desc != "" {
+					fmt.Fprintf(&b, ", Desc: %q", a.Desc)
 				}
 				b.WriteString("},\n")
 			}

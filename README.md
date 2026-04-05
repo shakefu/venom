@@ -82,7 +82,7 @@ Listening on 0.0.0.0:3000
 3. Run `go generate` to produce registration code
 4. Call `venom.Execute(...)` in main
 
-Functions become commands. Parameters become flags. Annotations control the CLI behavior:
+Functions become commands. Parameters become flags. Parameters annotated with `@arg` become positional arguments. Annotations control the CLI behavior:
 
 | Annotation | Where | Example |
 |------------|-------|---------|
@@ -91,6 +91,7 @@ Functions become commands. Parameters become flags. Annotations control the CLI 
 | `@default` | Parameter comment | `// @default 8080` |
 | `@short` | Parameter comment | `// @short p` |
 | `@required` | Parameter comment | `// @required` |
+| `@arg` | Parameter comment | `// @arg` |
 
 ## Naming conventions
 
@@ -117,6 +118,48 @@ Flag values are resolved from multiple sources in priority order:
 3. **Config file** — `.venom-example` (YAML, TOML, or JSON)
 4. **Default** — `@default` annotation value
 5. **Zero value** — type default (`0`, `""`, `false`)
+
+> **Note:** Positional arguments (`@arg`) resolve from the command line only. They do not participate in environment variable, config file, or default resolution (except `@default` for optional args).
+
+## Positional arguments
+
+Parameters annotated with `@arg` become positional arguments instead of flags:
+
+```go
+// @cmd copy files to a destination
+func copyFiles(
+	ctx context.Context,
+	src string,     // @arg @required @desc "source path"
+	dst string,     // @arg @desc "destination path"
+	extra []string, // @arg @desc "additional files"
+	verbose bool,   // @short v @desc "enable verbose output"
+) error {
+	// src, dst, extra are positional; verbose is a flag
+	return nil
+}
+```
+
+```
+$ myapp copy-files <src> [dst] [extra...]
+
+$ myapp copy-files main.go /tmp
+$ myapp copy-files main.go /tmp extra1.go extra2.go --verbose
+```
+
+Positional arguments:
+- Are declared with `@arg` in the parameter comment
+- Are ordered by their position in the function signature
+- Support three cardinalities:
+  - **Required** — `@arg @required` — must be provided
+  - **Optional** — `@arg` — may be omitted (falls back to `@default` or zero value)
+  - **Variadic** — `@arg` on a `[]string` parameter — collects all remaining arguments
+- Do **not** participate in environment variable or config file resolution
+- Can coexist with flags on the same command
+
+Ordering rules:
+- Required arguments must come before optional ones
+- A variadic argument must be last
+- At most one variadic argument per command
 
 ## Custom exit codes
 
