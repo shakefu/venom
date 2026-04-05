@@ -59,3 +59,64 @@ func main() {
 	// true
 	// true
 }
+
+func ExampleGenerate_withPositionalArgs() {
+	dir, err := os.MkdirTemp("", "venom-gen-*")
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	src := `package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/shakefu/venom"
+)
+
+// @cmd copy files to a destination
+func copyFiles(
+	ctx context.Context,
+	src string,     // @arg @required @desc "source path"
+	dst string,     // @arg @desc "destination path"
+	extra []string, // @arg @desc "additional files"
+	verbose bool,   // @short v @desc "enable verbose output"
+) error {
+	fmt.Printf("Copying %s to %s\n", src, dst)
+	return nil
+}
+
+func main() {
+	venom.Execute(copyFiles)
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0644); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+
+	if err := gen.Generate(dir); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+
+	out, err := os.ReadFile(filepath.Join(dir, "venom_gen.go"))
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+
+	content := string(out)
+	fmt.Println(strings.Contains(content, `Cardinality: venom.ArgRequired`))
+	fmt.Println(strings.Contains(content, `Cardinality: venom.ArgOptional`))
+	fmt.Println(strings.Contains(content, `Cardinality: venom.ArgVariadic`))
+	fmt.Println(strings.Contains(content, `"copy files to a destination"`))
+	// Output:
+	// true
+	// true
+	// true
+	// true
+}
