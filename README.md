@@ -93,6 +93,23 @@ Functions become commands. Parameters become flags. Parameters annotated with `@
 | `@required` | Parameter comment | `// @required` |
 | `@arg` | Parameter comment | `// @arg` |
 
+<!-- AI-GENERATED -->
+## Supported parameter types
+
+| Go type | Flag example | Default parsing |
+|---------|-------------|-----------------|
+| `string` | `--host localhost` | Bare string |
+| `int` | `--port 8080` | `strconv.Atoi` |
+| `int64` | `--size 1024` | `strconv.ParseInt` |
+| `float64` | `--rate 0.5` | `strconv.ParseFloat` |
+| `bool` | `--verbose` | `"true"` / `"false"` |
+| `[]string` | `--tags a,b,c` | Comma-separated |
+| `time.Duration` | `--timeout 30s` | `time.ParseDuration` |
+
+Unsupported types are silently ignored — the parameter will not appear as a flag.
+Positional arguments (`@arg`) support the same types, with variadic args restricted to `[]string`.
+<!-- /AI-GENERATED -->
+
 ## Naming conventions
 
 Venom derives CLI names from Go names automatically:
@@ -120,6 +137,26 @@ Flag values are resolved from multiple sources in priority order:
 5. **Zero value** — type default (`0`, `""`, `false`)
 
 > **Note:** Positional arguments (`@arg`) resolve from the command line only. They do not participate in environment variable, config file, or default resolution (except `@default` for optional args).
+
+<!-- AI-GENERATED -->
+Environment variables are formed from the app name prefix and the flag name in
+SCREAMING_SNAKE_CASE. Hyphens in flag names become underscores:
+
+| Flag | Environment variable |
+|------|---------------------|
+| `--port` | `VENOM_EXAMPLE_PORT` |
+| `--server-port` | `VENOM_EXAMPLE_SERVER_PORT` |
+
+Config files use the kebab-case flag name directly as the key. Venom
+searches for a file named `.<appName>` (e.g. `.venom-example.yaml`) in `.` and
+`$HOME` by default. Example `.venom-example.yaml`:
+
+```yaml
+port: 3000
+host: 0.0.0.0
+server-port: 9090
+```
+<!-- /AI-GENERATED -->
 
 ## Positional arguments
 
@@ -218,6 +255,57 @@ app.Execute(serve, initProject, version)
 ## Documentation
 
 - [Allium specification](venom.allium) — formal domain specification
+
+<!-- AI-GENERATED -->
+## Troubleshooting
+
+### `venom: no metadata registered for main.serve; did you run go generate?`
+
+The function was passed to `venom.Execute()` but has no entry in `venom_gen.go`.
+Run `go generate ./...` to regenerate registration code.
+
+### `venom: expected a function, got <type>`
+
+A non-function value was passed to `venom.Execute()`. Every argument must be a
+function, not a method value or a non-function type.
+
+### Panic: `venom: <func>: positional args "<a>" and "<b>" share position <N>`
+
+Two `@arg` parameters have the same index in the function signature. Each
+positional argument must occupy a unique position.
+
+### Panic: `venom: <func>: multiple variadic positional args: [...]`
+
+A command has more than one `[]string` parameter annotated with `@arg`. At most
+one variadic argument is allowed per command.
+
+### Panic: `venom: <func>: required positional arg "<name>" follows an optional arg`
+
+Required `@arg @required` parameters must come before optional `@arg` parameters
+in the function signature.
+
+### Panic: `venom: <func>: variadic arg "<name>" must be after all other positional args`
+
+The `[]string` variadic `@arg` parameter must be the last positional argument in
+the function signature.
+
+### Panic: `venom: <func>: variadic positional arg "<name>" must have type []string, got "<type>"`
+
+Variadic positional arguments must be typed `[]string`. Other slice types are not
+supported.
+
+### A parameter does not appear as a flag
+
+The parameter's Go type is not in the supported set (`string`, `int`, `int64`,
+`float64`, `bool`, `[]string`, `time.Duration`). Unsupported types are silently
+ignored. Use a supported type and parse inside the function body.
+
+### Duplicate short flag panic at startup
+
+Two parameters on the same command share the same `@short` letter. Cobra panics
+when duplicate shorthand flags are registered. Use unique `@short` values or
+remove the duplicate.
+<!-- /AI-GENERATED -->
 
 ## Contributing
 

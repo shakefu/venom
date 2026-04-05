@@ -116,7 +116,7 @@ func Generate(dir string) error {
 
 // parseAnnotations parses a comment string containing @-prefixed annotations.
 //
-// Supported annotations: @short, @default, @desc, @required, @cmd.
+// Supported annotations: @short, @default, @desc, @required, @cmd, @arg.
 // Values can be bare words or quoted strings. @required has no value.
 //
 // Example: `@short p @default 8080 @desc "port to listen on"`
