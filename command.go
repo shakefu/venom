@@ -28,10 +28,26 @@ func buildCommandTree(appName string, metas []*FuncMeta) *cobra.Command {
 
 // buildCommand creates a single cobra.Command from a FuncMeta.
 func buildCommand(meta *FuncMeta) *cobra.Command {
+	use := meta.CommandPath[len(meta.CommandPath)-1]
+	for _, pa := range meta.PositionalArgs {
+		switch pa.Cardinality {
+		case ArgRequired:
+			use += " <" + pa.Name + ">"
+		case ArgOptional:
+			use += " [" + pa.Name + "]"
+		case ArgVariadic:
+			use += " [" + pa.Name + "...]"
+		}
+	}
+
 	cmd := &cobra.Command{
-		Use:   meta.CommandPath[len(meta.CommandPath)-1],
+		Use:   use,
 		Short: meta.Description,
 		RunE:  makeRunFunc(meta),
+	}
+
+	if len(meta.PositionalArgs) > 0 {
+		cmd.Args = makeArgsValidator(meta.PositionalArgs)
 	}
 
 	for _, p := range meta.Params {
@@ -39,6 +55,34 @@ func buildCommand(meta *FuncMeta) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// makeArgsValidator returns a cobra positional arg validator based on the
+// declared positional args metadata.
+func makeArgsValidator(posArgs []PositionalArgMeta) cobra.PositionalArgs {
+	var requiredCount int
+	var hasVariadic bool
+	totalNonVariadic := 0
+
+	for _, pa := range posArgs {
+		switch pa.Cardinality {
+		case ArgRequired:
+			requiredCount++
+			totalNonVariadic++
+		case ArgOptional:
+			totalNonVariadic++
+		case ArgVariadic:
+			hasVariadic = true
+		}
+	}
+
+	if hasVariadic {
+		return cobra.MinimumNArgs(requiredCount)
+	}
+	if totalNonVariadic > requiredCount {
+		return cobra.RangeArgs(requiredCount, totalNonVariadic)
+	}
+	return cobra.ExactArgs(requiredCount)
 }
 
 // attachCommand walks (or creates) intermediate commands so that cmd is placed
@@ -144,7 +188,7 @@ func makeRunFunc(meta *FuncMeta) func(*cobra.Command, []string) error {
 		}
 
 		// Build argument list: first arg is always context.Context.
-		fnArgs := make([]reflect.Value, 0, 1+len(meta.Params))
+		fnArgs := make([]reflect.Value, 0, 1+len(meta.Params)+len(meta.PositionalArgs))
 		fnArgs = append(fnArgs, reflect.ValueOf(ctx))
 
 		for _, p := range meta.Params {
@@ -182,6 +226,34 @@ func makeRunFunc(meta *FuncMeta) func(*cobra.Command, []string) error {
 			fnArgs = append(fnArgs, reflect.ValueOf(val))
 		}
 
+		// Validate and collect positional arguments.
+		for _, pa := range meta.PositionalArgs {
+			if pa.Cardinality == ArgRequired && pa.Position >= len(args) {
+				return fmt.Errorf("required argument %q not provided", pa.Name)
+			}
+		}
+
+		for _, pa := range meta.PositionalArgs {
+			var val interface{}
+			switch {
+			case pa.Cardinality == ArgVariadic:
+				if pa.Position < len(args) {
+					val = args[pa.Position:]
+				} else {
+					val = []string{}
+				}
+			default:
+				if pa.Position < len(args) {
+					val = convertArg(args[pa.Position], pa.Type)
+				} else if pa.Default != "" {
+					val = convertArg(pa.Default, pa.Type)
+				} else {
+					val = zeroForType(pa.Type)
+				}
+			}
+			fnArgs = append(fnArgs, reflect.ValueOf(val))
+		}
+
 		results := reflect.ValueOf(meta.Func).Call(fnArgs)
 
 		// The function is expected to return a single error value.
@@ -202,4 +274,45 @@ func isZero(val interface{}) bool {
 		return true
 	}
 	return reflect.DeepEqual(val, reflect.Zero(reflect.TypeOf(val)).Interface())
+}
+
+// convertArg converts a string argument to the given Go type.
+func convertArg(s string, typ string) interface{} {
+	switch typ {
+	case "int":
+		v, _ := strconv.Atoi(s)
+		return v
+	case "int64":
+		v, _ := strconv.ParseInt(s, 10, 64)
+		return v
+	case "float64":
+		v, _ := strconv.ParseFloat(s, 64)
+		return v
+	case "bool":
+		v, _ := strconv.ParseBool(s)
+		return v
+	case "time.Duration":
+		v, _ := time.ParseDuration(s)
+		return v
+	default: // "string" and anything else
+		return s
+	}
+}
+
+// zeroForType returns the zero value for the given Go type string.
+func zeroForType(typ string) interface{} {
+	switch typ {
+	case "int":
+		return 0
+	case "int64":
+		return int64(0)
+	case "float64":
+		return float64(0)
+	case "bool":
+		return false
+	case "time.Duration":
+		return time.Duration(0)
+	default: // "string"
+		return ""
+	}
 }

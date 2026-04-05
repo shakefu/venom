@@ -26,4 +26,16 @@ func init() {
 		CommandPath: []string{"version"},
 		Description: "show version information",
 	})
+	venom.Register(&venom.FuncMeta{
+		FullName:    "main.copyFiles",
+		CommandPath: []string{"copy-files"},
+		Description: "copy files to a destination",
+		Params: []venom.ParamMeta{
+			{Name: "verbose", Type: "bool", FlagName: "verbose", Short: "v", Desc: "enable verbose output"},
+		},
+		PositionalArgs: []venom.PositionalArgMeta{
+			{Name: "src", Type: "string", Position: 0, Cardinality: venom.ArgRequired, Desc: "source file"},
+			{Name: "dst", Type: "string", Position: 1, Cardinality: venom.ArgOptional, Default: ".", Desc: "destination directory"},
+		},
+	})
 }

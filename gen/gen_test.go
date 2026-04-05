@@ -59,6 +59,21 @@ func TestParseAnnotations(t *testing.T) {
 			comment: `// @short v`,
 			want:    map[string]string{"short": "v"},
 		},
+		{
+			name:    "arg annotation",
+			comment: `// @arg @desc "file path"`,
+			want:    map[string]string{"arg": "", "desc": "file path"},
+		},
+		{
+			name:    "arg with required",
+			comment: `// @arg @required @desc "input file"`,
+			want:    map[string]string{"arg": "", "required": "true", "desc": "input file"},
+		},
+		{
+			name:    "arg alone",
+			comment: `// @arg`,
+			want:    map[string]string{"arg": ""},
+		},
 	}
 
 	for _, tt := range tests {

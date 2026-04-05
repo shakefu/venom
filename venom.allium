@@ -18,7 +18,11 @@ enum ParamType {
     string | int | int64 | float64 | bool | string_slice | duration
 }
 
--- Annotation tags are a closed set: cmd, short, default, desc, required
+enum ArgCardinality {
+    required | optional | variadic
+}
+
+-- Annotation tags are a closed set: cmd, short, default, desc, required, arg
 -- They appear as literals in rule comparisons (e.g. a.tag = cmd)
 
 ------------------------------------------------------------
@@ -46,6 +50,7 @@ entity Command {
     description: String?                 -- from @cmd annotation
     has_function: Boolean                -- true if a function is registered for this path
     params: Param with command = this
+    positional_args: PositionalArg with command = this
     children: Command with app = app      -- direct child commands (path extends this by one segment)
         where is_direct_child(path, this.path)
 
@@ -64,6 +69,16 @@ entity Param {
     default_value: String?               -- from @default
     description: String?                 -- from @desc
     required: Boolean                    -- from @required, default false
+}
+
+entity PositionalArg {
+    command: Command
+    name: String                         -- Go parameter name
+    type: ParamType
+    position: Integer                    -- 0-based index among positional args
+    cardinality: ArgCardinality          -- required, optional, or variadic
+    default_value: String?               -- from @default, only meaningful for optional
+    description: String?                 -- from @desc
 }
 
 ------------------------------------------------------------
@@ -114,6 +129,7 @@ rule DeriveParamFlag {
     when: ParameterRegistered(command, param_name, param_type, annotations)
 
     requires: param_type != context          -- context.Context is never a flag
+    requires: not annotations.any(a => a.tag = arg)  -- @arg params become positional, not flags
 
     let flag_name = to_kebab_case(param_name)
     let short = annotations.find(a => a.tag = short)
@@ -133,6 +149,44 @@ rule DeriveParamFlag {
     )
 }
 
+-- Positional argument derivation: @arg-annotated parameters become positional args
+
+rule DerivePositionalArg {
+    -- A Go parameter annotated with @arg becomes a positional argument
+    -- instead of a flag. Position is determined by declaration order among
+    -- @arg parameters in the function signature.
+    -- Cardinality:
+    --   - Slice types are variadic (collects remaining args)
+    --   - @required annotation marks required
+    --   - Otherwise optional
+
+    when: ParameterRegistered(command, param_name, param_type, annotations)
+
+    requires: param_type != context
+    requires: annotations.any(a => a.tag = arg)
+
+    let arg_annotation = annotations.find(a => a.tag = arg)
+    let default_val = annotations.find(a => a.tag = default)
+    let desc = annotations.find(a => a.tag = desc)
+    let is_required = annotations.any(a => a.tag = required)
+    let is_slice = param_type = string_slice
+
+    let cardinality =
+        if is_slice: variadic
+        else if is_required: required
+        else: optional
+
+    ensures: PositionalArg.created(
+        command: command,
+        name: param_name,
+        type: param_type,
+        position: arg_annotation.position,
+        cardinality: cardinality,
+        default_value: if default_val != null: default_val.value else: null,
+        description: if desc != null: desc.value else: null
+    )
+}
+
 -- Configuration resolution priority
 
 rule ResolveParamValue {
@@ -145,7 +199,7 @@ rule ResolveParamValue {
     --   4. Default from @default annotation
     --   5. Type zero value
 
-    when: CommandExecuted(command, flag_values, env_values, config_values)
+    when: CommandExecuted(command, flag_values, env_values, config_values, positional_values)
 
     ensures:
         for p in command.params:
@@ -157,6 +211,39 @@ rule ResolveParamValue {
                 p.default_value,
                 zero_value(p.type)
             )
+}
+
+-- Positional argument resolution: position only, no env/config fallback
+
+rule ResolvePositionalArgValue {
+    -- Positional arguments are resolved purely from their CLI position.
+    -- No environment variable or config file lookup.
+    -- Required args must be present. Optional args fall back to @default
+    -- or zero value. Variadic args collect all remaining CLI arguments.
+
+    when: CommandExecuted(command, flag_values, env_values, config_values, positional_values)
+
+    ensures:
+        for arg in command.positional_args:
+            if arg.cardinality = variadic:
+                arg.resolved_value = positional_values.from(arg.position)
+            else:
+                arg.resolved_value = first_of(
+                    positional_values.get(arg.position),
+                    arg.default_value,
+                    zero_value(arg.type)
+                )
+}
+
+-- Validation: required positional args must be supplied
+
+rule ValidateRequiredPositionalArgs {
+    when: CommandExecuted(command, flag_values, env_values, config_values, positional_values)
+
+    requires:
+        for arg in command.positional_args:
+            if arg.cardinality = required:
+                positional_values.get(arg.position) != null
 }
 
 -- Code generation
@@ -252,7 +339,7 @@ rule CommandFailsDefault {
 -- Required flag validation
 
 rule ValidateRequiredFlags {
-    when: CommandExecuted(command, flag_values, env_values, config_values)
+    when: CommandExecuted(command, flag_values, env_values, config_values, positional_values)
 
     requires:
         for p in command.params:
@@ -291,12 +378,93 @@ invariant ContextNeverAFlag {
         p.type != context
 }
 
-invariant ContextIsFirstParam {
-    -- Every command function must accept context.Context as its first parameter.
-    -- The framework injects the context at execution time; callers never supply it.
+invariant RequiredBeforeOptional {
+    -- Within a command, required positional args must precede optional ones.
     for command in Commands:
-        if command.has_function:
-            command.function.params[0].type = context
+        for r in command.positional_args:
+            for o in command.positional_args:
+                if r.cardinality = required and o.cardinality = optional:
+                    r.position < o.position
+}
+
+invariant VariadicIsLast {
+    -- A variadic positional arg must be the last positional arg in its command.
+    for command in Commands:
+        for v in command.positional_args:
+            if v.cardinality = variadic:
+                for other in command.positional_args:
+                    if other != v:
+                        other.position < v.position
+}
+
+invariant VariadicIsSlice {
+    -- A variadic positional arg must have a slice type.
+    for arg in PositionalArgs:
+        if arg.cardinality = variadic:
+            arg.type = string_slice
+}
+
+invariant UniquePositionalPositions {
+    -- Within a command, no two positional args share the same position.
+    for command in Commands:
+        for a1 in command.positional_args:
+            for a2 in command.positional_args:
+                if a1 != a2:
+                    a1.position != a2.position
+}
+
+invariant AtMostOneVariadic {
+    -- A command has at most one variadic positional arg.
+    for command in Commands:
+        command.positional_args.count(a => a.cardinality = variadic) <= 1
+}
+
+-- ContextIsFirstParam: Every command function must accept context.Context as its
+-- first parameter. The framework injects the context at execution time; callers
+-- never supply it. The context parameter is filtered out before flag registration
+-- (see DeriveParamFlag), so it does not appear in the Param entity. This constraint
+-- applies to the Go source function signature and is enforced by the code generator.
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Developer {
+    identified_by: User where role = developer
+}
+
+actor CLIUser {
+    identified_by: User where role = cli_user
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- Code generation: developer invokes `go generate` which scans source files,
+-- discovers annotated functions, and emits registrations.
+
+surface CodeGeneration {
+    facing _: Developer
+
+    provides:
+        GenerateRequested(directory)
+        FunctionRegistered(full_name, annotations)
+        ParameterRegistered(command, param_name, param_type, annotations)
+        -- ParameterRegistered serves both flag and positional arg derivation;
+        -- the @arg annotation determines which path is taken.
+}
+
+-- CLI execution: user runs the compiled binary, which builds the command tree,
+-- dispatches to the matched command, and reports the result.
+
+surface CLIExecution {
+    facing _: CLIUser
+
+    provides:
+        AppExecuted(app, functions)
+        CommandExecuted(command, flag_values, env_values, config_values, positional_values)
+        CommandCompleted(command, result)
 }
 
 -- No open questions remain.
