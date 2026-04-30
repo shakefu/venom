@@ -3,7 +3,8 @@
 
 -- Scope: Venom CLI framework — declarative CLI generation from annotated Go functions
 -- Includes: Function/parameter metadata, naming derivation, annotation parsing,
---           command tree construction, configuration resolution, code generation
+--           command tree construction, configuration resolution, code generation,
+--           extension hooks, app build/execute lifecycle, version resolution
 -- Excludes:
 --   - AST parsing mechanics (Go compiler tooling)
 --   - Reflection-based invocation (runtime implementation)
@@ -22,8 +23,17 @@ enum ArgCardinality {
     required | optional | variadic
 }
 
+enum ExtensionTarget {
+    cobra | viper
+}
+
 -- Annotation tags are a closed set: cmd, short, default, desc, required, arg
 -- They appear as literals in rule comparisons (e.g. a.tag = cmd)
+--
+-- Execution modes are a closed set: execute, build
+-- They appear as literals carried by the AppPrepared and ExtensionInvoked
+-- events (e.g. mode = execute). Execute mode dispatches the CLI via fang;
+-- build mode returns artifacts to the developer.
 
 ------------------------------------------------------------
 -- Entities
@@ -31,17 +41,39 @@ enum ArgCardinality {
 
 entity App {
     name: String                         -- derived from binary name or explicit
-    version: String?
+    version: String?                     -- explicit version override (e.g. via WithVersion)
     env_prefix: String                   -- derived from name or explicit
     config_name: String                  -- defaults to "." + name
     config_paths: List<String>            -- defaults to {".", "$HOME"}
 
     commands: Command with app = this
+    extensions: Extension with app = this  -- developer-supplied callbacks, see Extension entity
+
+    -- Derived
+    effective_version: String             -- resolved version string (see ResolveAppVersion)
+
+    -- An App is a configuration holder. It can be Executed (full CLI dispatch
+    -- via fang) or Built (returns the constructed cobra root and viper
+    -- instance to the caller). Each call produces a fresh cobra tree and
+    -- viper instance; the App itself is reusable.
 
     -- Built-in capabilities provided for every app:
     --   Shell completions (bash, zsh, fish, powershell)
     --   Man page generation
     --   Styled help output with usage, flags, and subcommand summaries
+}
+
+entity Extension {
+    app: App
+    position: Integer                    -- declaration order index, 0-based
+    target: ExtensionTarget              -- cobra (root command) or viper (config instance)
+
+    -- An Extension is a developer-supplied callback registered via
+    -- WithCobra or WithViper. The callback receives the underlying
+    -- artifact and returns null on success or a non-null error.
+    -- Internal callback logic is opaque to the spec.
+    --
+    -- A non-null error aborts App preparation (see ApplyExtensions).
 }
 
 entity Command {
@@ -270,6 +302,20 @@ rule GenerateRegistrations {
     )
 }
 
+-- App preparation: Execute and Build share the same preparation pipeline.
+
+rule TriggerPreparationFromExecute {
+    -- Execute begins the preparation pipeline before delegating to fang.
+    when: AppExecuted(app, functions)
+    ensures: AppPrepared(app, functions, mode: execute)
+}
+
+rule TriggerPreparationFromBuild {
+    -- Build begins the same preparation pipeline before returning artifacts.
+    when: AppBuildRequested(app, functions)
+    ensures: AppPrepared(app, functions, mode: build)
+}
+
 -- Command tree construction
 
 rule BuildCommandTree {
@@ -279,7 +325,7 @@ rule BuildCommandTree {
     -- Example: registering serve() and serve_tls() produces:
     --   root -> serve (executable + group) -> tls (executable)
 
-    when: AppExecuted(app, functions)
+    when: AppPrepared(app, functions, mode)
 
     ensures:
         for fn in functions:
@@ -296,6 +342,117 @@ rule BuildCommandTree {
                         path: parent_path,
                         has_function: false
                     )
+}
+
+-- Extension application
+
+rule ApplyExtensions {
+    -- After Venom configures viper (env prefix, config paths, config file
+    -- read) and builds the cobra command tree (including persistent flag
+    -- binding), registered extension callbacks fire in declaration order.
+    --
+    -- Each callback receives the corresponding underlying artifact:
+    --   target = cobra → the cobra root command
+    --   target = viper → the per-app viper instance
+    --
+    -- Callbacks may freely mutate their target. The framework does not
+    -- restrict what an extension can do (add commands, replace hooks,
+    -- override defaults, add config paths, re-read config, etc.).
+    --
+    -- Multiple extensions, including a mix of cobra and viper targets,
+    -- run in the order they were declared on the App.
+
+    when: AppPrepared(app, functions, mode)
+
+    -- app.extensions is a List, iterated in declaration order.
+    ensures:
+        for ext in app.extensions:
+            let artifact =
+                if ext.target = cobra: app.cobra_root
+                else: app.viper_instance
+            ExtensionInvoked(
+                extension: ext,
+                artifact: artifact,
+                mode: mode
+            )
+}
+
+rule ExtensionFailureAbortsExecute {
+    -- An extension callback returning a non-null error during Execute
+    -- aborts preparation: the error is printed to stderr and the process
+    -- exits with code 1. fang.Execute is never reached.
+
+    when: ExtensionInvoked(extension, artifact, mode)
+
+    requires: mode = execute
+    requires: invoke_result(extension, artifact).error != null
+
+    ensures: ErrorPrinted(to: stderr, message: invoke_result(extension, artifact).error.message)
+    ensures: ProcessExit(code: 1)
+}
+
+rule ExtensionFailureAbortsBuild {
+    -- An extension callback returning a non-null error during Build aborts
+    -- preparation: the error is returned to the caller and no artifacts
+    -- are produced.
+
+    when: ExtensionInvoked(extension, artifact, mode)
+
+    requires: mode = build
+    requires: invoke_result(extension, artifact).error != null
+
+    ensures: AppBuildFailed(
+        app: extension.app,
+        error: invoke_result(extension, artifact).error
+    )
+}
+
+-- Build path: developer receives constructed artifacts
+
+rule AppBuildSucceeds {
+    -- When all preparation completes without error, Build returns the
+    -- constructed cobra root and viper instance to the caller. The App
+    -- itself remains reusable; subsequent calls to Build or Execute
+    -- produce a fresh cobra tree and viper instance.
+
+    when: AppPrepared(app, functions, mode)
+
+    requires: mode = build
+    requires: not app.extensions.any(e => invoke_result(e).error != null)
+
+    ensures: AppBuilt(
+        app: app,
+        cobra_root: app.cobra_root,
+        viper_instance: app.viper_instance
+    )
+}
+
+-- Version resolution
+
+rule ResolveAppVersion {
+    -- The version string reported by --version is resolved in priority order:
+    --   1. Explicit App.version (set via WithVersion).
+    --   2. runtime/debug.ReadBuildInfo().Main.Version, if set and not "(devel)".
+    --      Populated by `go install` from a tagged module.
+    --   3. Short VCS revision (first 7 chars of vcs.revision setting),
+    --      if VCS info is embedded in the build.
+    --   4. "build-" + current timestamp formatted as YYYYMMDDhhmm,
+    --      so the version is never empty.
+
+    when: AppPrepared(app, functions, mode)
+
+    let build_info = read_build_info()
+    let main_version = build_info.main_version
+    let vcs_revision = build_info.vcs_revision
+    let now_stamp = format_timestamp(current_time(), "YYYYMMDDhhmm")
+
+    ensures:
+        app.effective_version = first_of(
+            app.version,
+            if main_version != null and main_version != "(devel)": main_version,
+            if vcs_revision != null: short_sha(vcs_revision, 7),
+            "build-" + now_stamp
+        )
 }
 
 -- Error handling and exit codes
@@ -419,6 +576,25 @@ invariant AtMostOneVariadic {
         command.positional_args.count(a => a.cardinality = variadic) <= 1
 }
 
+invariant ExtensionPositionsAreUnique {
+    -- Within an App, no two extensions share the same declaration position.
+    for app in Apps:
+        for e1 in app.extensions:
+            for e2 in app.extensions:
+                if e1 != e2:
+                    e1.position != e2.position
+}
+
+invariant ExtensionPositionsAreValid {
+    -- Extension positions are 0-based indices into the App's extension list.
+    -- Combined with ExtensionPositionsAreUnique, this implies the positions
+    -- are exactly {0, 1, ..., n-1} for an App with n extensions.
+    for app in Apps:
+        for e in app.extensions:
+            e.position >= 0
+            and e.position < app.extensions.count
+}
+
 -- ContextIsFirstParam: Every command function must accept context.Context as its
 -- first parameter. The framework injects the context at execution time; callers
 -- never supply it. The context parameter is filtered out before flag registration
@@ -465,6 +641,23 @@ surface CLIExecution {
         AppExecuted(app, functions)
         CommandExecuted(command, flag_values, env_values, config_values, positional_values)
         CommandCompleted(command, result)
+}
+
+-- App construction: developer invokes Build from main() to obtain the
+-- constructed cobra root and viper instance instead of dispatching the CLI
+-- directly. Used when the developer wants to compose Venom's output with
+-- additional cobra/viper logic, customize fang invocation, or own the
+-- execution loop entirely.
+
+surface AppConstruction {
+    facing _: Developer
+
+    provides:
+        AppBuildRequested(app, functions)
+        AppPrepared(app, functions, mode)
+        ExtensionInvoked(extension, artifact, mode)
+        AppBuilt(app, cobra_root, viper_instance)
+        AppBuildFailed(app, error)
 }
 
 -- No open questions remain.
