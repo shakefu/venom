@@ -10,38 +10,37 @@ import (
 )
 
 func TestSetupViperDefaults(t *testing.T) {
-	viper.Reset()
-
 	cfg := &appConfig{
 		appName: "myapp",
 	}
-	if err := setupViper(cfg); err != nil {
+	v := viper.New()
+	if err := setupViper(cfg, v); err != nil {
 		t.Fatalf("setupViper returned error: %v", err)
 	}
 
 	// Env prefix should be derived as SCREAMING_SNAKE of appName.
 	// Verify by setting an env var and reading it through viper.
 	t.Run("env_prefix_derived_from_app_name", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 		cfg := &appConfig{appName: "my-app"}
-		if err := setupViper(cfg); err != nil {
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper returned error: %v", err)
 		}
 		os.Setenv("MY_APP_SOME_KEY", "hello")
 		defer os.Unsetenv("MY_APP_SOME_KEY")
-		// AutomaticEnv + prefix means viper.Get("some_key") should resolve.
-		got := viper.GetString("some_key")
+		// AutomaticEnv + prefix means v.Get("some_key") should resolve.
+		got := v.GetString("some_key")
 		if got != "hello" {
 			t.Errorf("expected env prefix MY_APP to resolve some_key = %q, got %q", "hello", got)
 		}
 	})
 
 	t.Run("config_name_defaults_to_dot_appname", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 		cfg := &appConfig{appName: "myapp"}
 		// We can't directly inspect viper's config name, but we verify no error
 		// is returned and the function completes (config file not found is OK).
-		if err := setupViper(cfg); err != nil {
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper returned error: %v", err)
 		}
 	})
@@ -52,24 +51,23 @@ func TestSetupViperDefaults(t *testing.T) {
 		// should add "." and "$HOME". Since there is no config file in either
 		// location, ReadInConfig returns ConfigFileNotFoundError which is
 		// swallowed, so setupViper should succeed.
-		viper.Reset()
+		v := viper.New()
 		cfg := &appConfig{appName: "myapp"}
-		if err := setupViper(cfg); err != nil {
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper returned error: %v", err)
 		}
 	})
 }
 
 func TestSetupViperExplicitConfig(t *testing.T) {
-	viper.Reset()
-
 	cfg := &appConfig{
 		appName:     "myapp",
 		envPrefix:   "CUSTOM_PREFIX",
 		configName:  "custom-config",
 		configPaths: []string{"/tmp"},
 	}
-	if err := setupViper(cfg); err != nil {
+	v := viper.New()
+	if err := setupViper(cfg, v); err != nil {
 		t.Fatalf("setupViper returned error: %v", err)
 	}
 
@@ -77,7 +75,7 @@ func TestSetupViperExplicitConfig(t *testing.T) {
 	os.Setenv("CUSTOM_PREFIX_TEST_VAR", "works")
 	defer os.Unsetenv("CUSTOM_PREFIX_TEST_VAR")
 
-	got := viper.GetString("test_var")
+	got := v.GetString("test_var")
 	if got != "works" {
 		t.Errorf("expected explicit env prefix to resolve test_var = %q, got %q", "works", got)
 	}
@@ -158,11 +156,10 @@ func TestPathsEqual(t *testing.T) {
 }
 
 func TestBindCommandFlags(t *testing.T) {
-	viper.Reset()
-
 	cfg := &appConfig{
 		appName: "testapp",
 	}
+	v := viper.New()
 
 	// Set up a cobra command with a flag.
 	root := &cobra.Command{Use: "testapp"}
@@ -183,10 +180,10 @@ func TestBindCommandFlags(t *testing.T) {
 	// Set the flag value.
 	child.Flags().Set("port", "9090")
 
-	bindCommandFlags(cfg, child, metas)
+	bindCommandFlags(cfg, v, child, metas)
 
 	// Viper should now be able to read the flag value.
-	got := viper.GetString("port")
+	got := v.GetString("port")
 	if got != "9090" {
 		t.Errorf("expected viper to read flag value %q, got %q", "9090", got)
 	}
@@ -194,10 +191,9 @@ func TestBindCommandFlags(t *testing.T) {
 
 func TestResolveParamValuePriority(t *testing.T) {
 	t.Run("flag_wins_over_env", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -223,19 +219,18 @@ func TestResolveParamValuePriority(t *testing.T) {
 		// Set flag value (simulates CLI --host=flag-host).
 		child.Flags().Set("host", "flag-host")
 
-		bindCommandFlags(cfg, child, metas)
+		bindCommandFlags(cfg, v, child, metas)
 
-		got := viper.GetString("host")
+		got := v.GetString("host")
 		if got != "flag-host" {
 			t.Errorf("expected flag to win: got %q, want %q", got, "flag-host")
 		}
 	})
 
 	t.Run("env_wins_when_flag_not_set", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -257,19 +252,18 @@ func TestResolveParamValuePriority(t *testing.T) {
 		os.Setenv("TESTAPP_HOST", "env-host")
 		defer os.Unsetenv("TESTAPP_HOST")
 
-		bindCommandFlags(cfg, child, metas)
+		bindCommandFlags(cfg, v, child, metas)
 
-		got := viper.GetString("host")
+		got := v.GetString("host")
 		if got != "env-host" {
 			t.Errorf("expected env to win: got %q, want %q", got, "env-host")
 		}
 	})
 
 	t.Run("default_applies_when_nothing_set", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -288,9 +282,9 @@ func TestResolveParamValuePriority(t *testing.T) {
 			},
 		}
 
-		bindCommandFlags(cfg, child, metas)
+		bindCommandFlags(cfg, v, child, metas)
 
-		got := viper.GetString("host")
+		got := v.GetString("host")
 		if got != "default-host" {
 			t.Errorf("expected default: got %q, want %q", got, "default-host")
 		}
@@ -299,10 +293,9 @@ func TestResolveParamValuePriority(t *testing.T) {
 
 func TestRequiredFlagValidation(t *testing.T) {
 	t.Run("required_flag_not_set_returns_error", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -320,12 +313,12 @@ func TestRequiredFlagValidation(t *testing.T) {
 			Func: fn,
 		}
 
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		root := &cobra.Command{Use: "testapp"}
 		root.AddCommand(cmd)
 
 		// Bind flags so viper knows about them.
-		bindCommandFlags(cfg, cmd, []*FuncMeta{meta})
+		bindCommandFlags(cfg, v, cmd, []*FuncMeta{meta})
 
 		// Execute the RunE directly without setting the flag.
 		err := cmd.RunE(cmd, []string{})
@@ -339,10 +332,9 @@ func TestRequiredFlagValidation(t *testing.T) {
 	})
 
 	t.Run("required_flag_satisfied_by_env", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -359,7 +351,7 @@ func TestRequiredFlagValidation(t *testing.T) {
 			Func: fn,
 		}
 
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		root := &cobra.Command{Use: "testapp"}
 		root.AddCommand(cmd)
 
@@ -367,7 +359,7 @@ func TestRequiredFlagValidation(t *testing.T) {
 		os.Setenv("TESTAPP_PORT", "3000")
 		defer os.Unsetenv("TESTAPP_PORT")
 
-		bindCommandFlags(cfg, cmd, []*FuncMeta{meta})
+		bindCommandFlags(cfg, v, cmd, []*FuncMeta{meta})
 
 		err := cmd.RunE(cmd, []string{})
 		if err != nil {
@@ -376,10 +368,9 @@ func TestRequiredFlagValidation(t *testing.T) {
 	})
 
 	t.Run("required_flag_satisfied_by_flag", func(t *testing.T) {
-		viper.Reset()
-
 		cfg := &appConfig{appName: "testapp"}
-		if err := setupViper(cfg); err != nil {
+		v := viper.New()
+		if err := setupViper(cfg, v); err != nil {
 			t.Fatalf("setupViper: %v", err)
 		}
 
@@ -394,14 +385,14 @@ func TestRequiredFlagValidation(t *testing.T) {
 			},
 		}
 
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		root := &cobra.Command{Use: "testapp"}
 		root.AddCommand(cmd)
 
 		// Set the flag directly.
 		cmd.Flags().Set("port", "8080")
 
-		bindCommandFlags(cfg, cmd, []*FuncMeta{meta})
+		bindCommandFlags(cfg, v, cmd, []*FuncMeta{meta})
 
 		err := cmd.RunE(cmd, []string{})
 		if err != nil {

@@ -69,7 +69,7 @@ func TestBuildCommandTree(t *testing.T) {
 		},
 	}
 
-	root := buildCommandTree("myapp", metas)
+	root := buildCommandTree("myapp", metas, viper.New())
 
 	t.Run("root Use is appName", func(t *testing.T) {
 		if root.Use != "myapp" {
@@ -217,7 +217,7 @@ func TestBuildCommand(t *testing.T) {
 		Func:        testNoopCmd,
 	}
 
-	cmd := buildCommand(meta)
+	cmd := buildCommand(meta, viper.New())
 
 	t.Run("Use is last path segment", func(t *testing.T) {
 		if cmd.Use != "tls" {
@@ -295,7 +295,7 @@ func TestRegisterFlag(t *testing.T) {
 
 func TestMakeRunFunc(t *testing.T) {
 	t.Run("nil return success", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 
 		meta := &FuncMeta{
 			FullName:    runtimeName(testNoopCmd),
@@ -304,7 +304,7 @@ func TestMakeRunFunc(t *testing.T) {
 			Func:        testNoopCmd,
 		}
 
-		runE := makeRunFunc(meta)
+		runE := makeRunFunc(meta, v)
 		cmd := &cobra.Command{Use: "noop"}
 		cmd.SetContext(context.Background())
 
@@ -315,7 +315,7 @@ func TestMakeRunFunc(t *testing.T) {
 	})
 
 	t.Run("error return", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 
 		meta := &FuncMeta{
 			FullName:    runtimeName(testErrorCmd),
@@ -324,7 +324,7 @@ func TestMakeRunFunc(t *testing.T) {
 			Func:        testErrorCmd,
 		}
 
-		runE := makeRunFunc(meta)
+		runE := makeRunFunc(meta, v)
 		cmd := &cobra.Command{Use: "fail"}
 		cmd.SetContext(context.Background())
 
@@ -338,7 +338,7 @@ func TestMakeRunFunc(t *testing.T) {
 	})
 
 	t.Run("ExitCoder error return", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 
 		meta := &FuncMeta{
 			FullName:    runtimeName(testExitCodeCmd),
@@ -347,7 +347,7 @@ func TestMakeRunFunc(t *testing.T) {
 			Func:        testExitCodeCmd,
 		}
 
-		runE := makeRunFunc(meta)
+		runE := makeRunFunc(meta, v)
 		cmd := &cobra.Command{Use: "exitcode"}
 		cmd.SetContext(context.Background())
 
@@ -371,7 +371,7 @@ func TestMakeRunFunc(t *testing.T) {
 	})
 
 	t.Run("with parameters", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 
 		meta := &FuncMeta{
 			FullName:    runtimeName(testParamCmd),
@@ -384,13 +384,13 @@ func TestMakeRunFunc(t *testing.T) {
 			Func: testParamCmd,
 		}
 
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		cmd.SetContext(context.Background())
 
 		// Bind flags to viper so makeRunFunc can read them.
-		viper.BindPFlags(cmd.Flags())
+		v.BindPFlags(cmd.Flags())
 
-		runE := makeRunFunc(meta)
+		runE := makeRunFunc(meta, v)
 		err := runE(cmd, nil)
 		if err != nil {
 			t.Fatalf("expected nil error, got %v", err)
@@ -398,7 +398,7 @@ func TestMakeRunFunc(t *testing.T) {
 	})
 
 	t.Run("required flag missing", func(t *testing.T) {
-		viper.Reset()
+		v := viper.New()
 
 		meta := &FuncMeta{
 			FullName:    runtimeName(testParamCmd),
@@ -411,11 +411,11 @@ func TestMakeRunFunc(t *testing.T) {
 			Func: testParamCmd,
 		}
 
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		cmd.SetContext(context.Background())
-		viper.BindPFlags(cmd.Flags())
+		v.BindPFlags(cmd.Flags())
 
-		runE := makeRunFunc(meta)
+		runE := makeRunFunc(meta, v)
 		err := runE(cmd, nil)
 		if err == nil {
 			t.Fatal("expected error for missing required flag")

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // dummyFunc is a placeholder for FuncMeta.Func so that buildCommand can create
@@ -50,7 +51,7 @@ func TestUniqueShortFlags(t *testing.T) {
 			}
 
 			panicked := didPanic(func() {
-				buildCommand(meta)
+				buildCommand(meta, viper.New())
 			})
 
 			if tt.shouldPanic && !panicked {
@@ -100,7 +101,7 @@ func TestUniqueFlagNames(t *testing.T) {
 			}
 
 			panicked := didPanic(func() {
-				buildCommand(meta)
+				buildCommand(meta, viper.New())
 			})
 
 			if tt.shouldPanic && !panicked {
@@ -150,7 +151,7 @@ func TestContextNeverAFlag(t *testing.T) {
 				Func:        dummyFunc,
 			}
 
-			cmd := buildCommand(meta)
+			cmd := buildCommand(meta, viper.New())
 
 			// No flag should have a context-related type.
 			cmd.Flags().VisitAll(func(f *pflag.Flag) {
