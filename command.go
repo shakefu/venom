@@ -12,22 +12,25 @@ import (
 )
 
 // buildCommandTree creates a root cobra.Command and attaches a sub-command for
-// each FuncMeta at the appropriate depth in the tree.
-func buildCommandTree(appName string, metas []*FuncMeta) *cobra.Command {
+// each FuncMeta at the appropriate depth in the tree. Each sub-command's RunE
+// closure captures v so flag values are resolved from the given viper instance
+// at execution time.
+func buildCommandTree(appName string, metas []*FuncMeta, v *viper.Viper) *cobra.Command {
 	root := &cobra.Command{
 		Use: appName,
 	}
 
 	for _, meta := range metas {
-		cmd := buildCommand(meta)
+		cmd := buildCommand(meta, v)
 		attachCommand(root, meta.CommandPath, cmd)
 	}
 
 	return root
 }
 
-// buildCommand creates a single cobra.Command from a FuncMeta.
-func buildCommand(meta *FuncMeta) *cobra.Command {
+// buildCommand creates a single cobra.Command from a FuncMeta. v is captured
+// in the RunE closure so flag values resolve from the given viper instance.
+func buildCommand(meta *FuncMeta, v *viper.Viper) *cobra.Command {
 	use := meta.CommandPath[len(meta.CommandPath)-1]
 	for _, pa := range meta.PositionalArgs {
 		switch pa.Cardinality {
@@ -43,7 +46,7 @@ func buildCommand(meta *FuncMeta) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: meta.Description,
-		RunE:  makeRunFunc(meta),
+		RunE:  makeRunFunc(meta, v),
 	}
 
 	if len(meta.PositionalArgs) > 0 {
@@ -178,9 +181,9 @@ func registerFlag(cmd *cobra.Command, p ParamMeta) {
 	}
 }
 
-// makeRunFunc returns a RunE closure that reads flag values from viper and
-// invokes the underlying function via reflection.
-func makeRunFunc(meta *FuncMeta) func(*cobra.Command, []string) error {
+// makeRunFunc returns a RunE closure that reads flag values from the given
+// viper instance and invokes the underlying function via reflection.
+func makeRunFunc(meta *FuncMeta, v *viper.Viper) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		if ctx == nil {
@@ -197,19 +200,19 @@ func makeRunFunc(meta *FuncMeta) func(*cobra.Command, []string) error {
 
 			switch p.Type {
 			case "string":
-				val = viper.GetString(key)
+				val = v.GetString(key)
 			case "int":
-				val = viper.GetInt(key)
+				val = v.GetInt(key)
 			case "int64":
-				val = viper.GetInt64(key)
+				val = v.GetInt64(key)
 			case "float64":
-				val = viper.GetFloat64(key)
+				val = v.GetFloat64(key)
 			case "bool":
-				val = viper.GetBool(key)
+				val = v.GetBool(key)
 			case "[]string":
-				val = viper.GetStringSlice(key)
+				val = v.GetStringSlice(key)
 			case "time.Duration":
-				val = viper.GetDuration(key)
+				val = v.GetDuration(key)
 			default:
 				return fmt.Errorf("unsupported parameter type %q for flag %q", p.Type, p.FlagName)
 			}

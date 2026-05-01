@@ -15,28 +15,32 @@ type appConfig struct {
 	version     string
 	configPaths []string
 	configName  string
+	extensions  []extension
 }
 
-// setupViper initializes the global viper instance with the given app config.
-func setupViper(cfg *appConfig) error {
+// setupViper configures the given viper instance with the env prefix, config
+// name, and config search paths derived from cfg, then attempts to read the
+// config file. A "config file not found" error is swallowed; any other error
+// is returned.
+func setupViper(cfg *appConfig, v *viper.Viper) error {
 	// Env prefix: use explicit envPrefix, or SCREAMING_SNAKE of appName.
 	prefix := cfg.envPrefix
 	if prefix == "" {
 		prefix = strings.ToUpper(strings.ReplaceAll(cfg.appName, "-", "_"))
 	}
-	viper.SetEnvPrefix(prefix)
+	v.SetEnvPrefix(prefix)
 
-	viper.AutomaticEnv()
+	v.AutomaticEnv()
 
 	// Replace hyphens with underscores so kebab-case flags match SCREAMING_SNAKE env vars.
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
 	// Config file name.
 	configName := cfg.configName
 	if configName == "" {
 		configName = "." + cfg.appName
 	}
-	viper.SetConfigName(configName)
+	v.SetConfigName(configName)
 
 	// Config search paths.
 	paths := cfg.configPaths
@@ -44,11 +48,11 @@ func setupViper(cfg *appConfig) error {
 		paths = []string{".", "$HOME"}
 	}
 	for _, p := range paths {
-		viper.AddConfigPath(p)
+		v.AddConfigPath(p)
 	}
 
 	// Read config file; ignore "not found" errors.
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
 			return err
@@ -57,10 +61,10 @@ func setupViper(cfg *appConfig) error {
 	return nil
 }
 
-// bindCommandFlags binds flags and env vars for the currently executing command.
-// It finds the matching FuncMeta by comparing command paths, then binds each
-// parameter's flag and env var to the global viper instance.
-func bindCommandFlags(cfg *appConfig, cmd *cobra.Command, metas []*FuncMeta) {
+// bindCommandFlags binds flags and env vars for the currently executing
+// command to the given viper instance. It finds the matching FuncMeta by
+// comparing command paths, then binds each parameter's flag and env var.
+func bindCommandFlags(cfg *appConfig, v *viper.Viper, cmd *cobra.Command, metas []*FuncMeta) {
 	// Build the command path from the executing command.
 	cmdPath := buildCommandPath(cmd)
 
@@ -87,9 +91,9 @@ func bindCommandFlags(cfg *appConfig, cmd *cobra.Command, metas []*FuncMeta) {
 		envVar := flagToEnvVar(prefix, p.FlagName)
 
 		if f := cmd.Flags().Lookup(p.FlagName); f != nil {
-			_ = viper.BindPFlag(configKey, f)
+			_ = v.BindPFlag(configKey, f)
 		}
-		_ = viper.BindEnv(configKey, envVar)
+		_ = v.BindEnv(configKey, envVar)
 	}
 }
 
