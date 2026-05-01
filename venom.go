@@ -79,12 +79,25 @@ func New(opts ...Option) *App {
 func (a *App) Execute(fns ...interface{}) {
 	if err := a.run(context.Background(), fns); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		code := 1
-		if ec, ok := err.(ExitCoder); ok {
-			code = ec.ErrorCode()
-		}
-		os.Exit(code)
+		os.Exit(errorExitCode(err))
 	}
+}
+
+// errorExitCode maps an error to a process exit code, implementing rules
+// CommandSucceeds, CommandFailsWithCode, and CommandFailsDefault in
+// venom.allium:
+//
+//   - nil error          → 0 (CommandSucceeds)
+//   - error has ErrorCode → that code (CommandFailsWithCode)
+//   - any other error    → 1 (CommandFailsDefault)
+func errorExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if ec, ok := err.(ExitCoder); ok {
+		return ec.ErrorCode()
+	}
+	return 1
 }
 
 // Build resolves metadata, configures viper, builds the cobra command tree,
