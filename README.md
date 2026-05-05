@@ -318,6 +318,11 @@ go build -ldflags "-X main.version=$(git describe --tags)" .
 ## Documentation
 
 - [Allium specification](venom.allium) — formal domain specification
+- Examples in [`example/`](example/):
+  - [`basic/`](example/basic/) — flags, positional args, and the simplest `venom.Execute` entry point
+  - [`subcommands/`](example/subcommands/) — underscore-named functions producing a command hierarchy (`serve_http` → `serve http`, `db_migrate` → `db migrate`)
+  - [`extensions/`](example/extensions/) — `WithCobra` and `WithViper` hooks for hand-rolled subcommands and viper customisation
+  - [`build/`](example/build/) — `App.Build` escape hatch for owning dispatch, composing with hand-rolled commands, or replacing fang
 
 <!-- AI-GENERATED -->
 ## Troubleshooting
