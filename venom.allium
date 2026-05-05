@@ -281,13 +281,16 @@ rule ValidateRequiredPositionalArgs {
 -- Code generation
 
 rule GenerateRegistrations {
-    -- The code generator scans source files for venom.Execute(...) calls,
-    -- extracts function metadata from signatures and annotations,
-    -- and produces a venom_gen.go file with init() registrations.
+    -- The code generator scans source files for venom.Execute(...) and
+    -- App.Build(...) calls, extracts function metadata from signatures
+    -- and annotations, and produces a venom_gen.go file with init()
+    -- registrations. Execute and Build register the same set of command
+    -- functions; the generator treats them identically.
 
     when: GenerateRequested(directory)
 
-    -- Find all venom.Execute() calls in .go files (excluding tests and generated files)
+    -- Find all venom.Execute() and App.Build() calls in .go files
+    -- (excluding tests and generated files).
     let source_functions = scan_execute_calls(directory)
 
     ensures:
