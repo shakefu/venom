@@ -1,8 +1,9 @@
 // Package gen implements code generation for the venom CLI framework.
 //
-// It parses Go source files to find venom.Execute() calls, extracts function
-// metadata (parameter names, types, and comment annotations), and writes a
-// venom_gen.go file containing init() code that registers each command.
+// It parses Go source files to find venom.Execute() and App.Build() calls,
+// extracts function metadata (parameter names, types, and comment
+// annotations), and writes a venom_gen.go file containing init() code that
+// registers each command.
 package gen
 
 import (
@@ -49,8 +50,8 @@ type argInfo struct {
 }
 
 // Generate is the main entry point. It parses all .go files in dir (excluding
-// *_test.go and venom_gen.go), finds venom.Execute() calls, extracts function
-// metadata, and writes venom_gen.go.
+// *_test.go and venom_gen.go), finds venom.Execute() and App.Build() calls,
+// extracts function metadata, and writes venom_gen.go.
 func Generate(dir string) error {
 	fset := token.NewFileSet()
 
@@ -198,8 +199,10 @@ func parseAnnotations(comment string) map[string]string {
 	return result
 }
 
-// findExecuteCalls walks the AST to find venom.Execute(...) or <recv>.Execute(...)
-// calls and returns the function name arguments.
+// findExecuteCalls walks the AST to find venom.Execute(...), <recv>.Execute(...)
+// or <recv>.Build(...) calls and returns the function name arguments. Both
+// Execute and Build register the same set of command functions; the gen tool
+// treats them identically.
 func findExecuteCalls(files []*ast.File) []string {
 	var funcNames []string
 
@@ -228,20 +231,20 @@ func findExecuteCalls(files []*ast.File) []string {
 	return funcNames
 }
 
-// isExecuteCall checks whether a call expression is a venom.Execute() or
-// <receiver>.Execute() call.
+// isExecuteCall checks whether a call expression is a venom.Execute(),
+// <receiver>.Execute(), or <receiver>.Build() call.
 func isExecuteCall(call *ast.CallExpr) bool {
 	switch fn := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		if fn.Sel.Name != "Execute" {
+		if fn.Sel.Name != "Execute" && fn.Sel.Name != "Build" {
 			return false
 		}
-		// venom.Execute(...)
+		// venom.Execute(...), app.Execute(...), or app.Build(...)
 		if ident, ok := fn.X.(*ast.Ident); ok {
 			if ident.Name == "venom" {
 				return true
 			}
-			// app.Execute(...) or any receiver
+			// app.Execute(...), app.Build(...), or any receiver
 			return true
 		}
 		return false
