@@ -252,6 +252,69 @@ app := venom.New(
 app.Execute(serve, initProject, version)
 ```
 
+### Extension hooks
+
+Reach into the underlying cobra and viper instances during App preparation without giving up Venom's codegen and resolution. Pass `WithCobra` or `WithViper` (or both, multiple times — they fire in declaration order):
+
+```go
+app := venom.New(
+	venom.WithCobra(func(root *cobra.Command) error {
+		root.SilenceUsage = true
+		return nil
+	}),
+	venom.WithViper(func(v *viper.Viper) error {
+		v.SetDefault("database.url", "postgres://localhost")
+		v.AddConfigPath("/etc/myapp")
+		return nil
+	}),
+)
+app.Execute(serve, initProject)
+```
+
+Callbacks fire after Venom completes its internal setup (env prefix, config paths, config file read, command tree, persistent flag binding) and before the CLI dispatches. A non-nil return aborts: during `Execute` the error is printed to stderr and the process exits 1; during `Build` the error is returned to the caller.
+
+> If you call `v.Unmarshal(&cfg)` inside `WithViper`, remember that viper uses `mapstructure` tags, not `yaml` or `json`.
+
+### Owning execution
+
+When you outgrow `Execute` — to compose with hand-rolled commands, customize fang, or own the dispatch loop — call `Build` instead. It runs the same preparation pipeline as `Execute` (including any registered extensions) and returns the constructed cobra root and viper instance:
+
+```go
+app := venom.New(opts...)
+root, v, err := app.Build(serve, initProject)
+if err != nil {
+	log.Fatal(err)
+}
+// Compose, mutate, dispatch yourself.
+return fang.Execute(ctx, root, fang.WithVersion("custom"))
+```
+
+Each call to `Execute` or `Build` produces a fresh cobra tree and viper instance; the App is reusable.
+
+### Version reporting
+
+`--version` is never empty. When `WithVersion` is unset, Venom resolves a version string in this order:
+
+1. `runtime/debug.ReadBuildInfo().Main.Version` — populated by `go install` from a tagged module (e.g. `v1.2.3`).
+2. The first 7 characters of the embedded VCS revision — `go build` from a git checkout (e.g. `abc1234`).
+3. `build-<YYYYMMDDhhmm>` from the current time, as a final fallback.
+
+For released binaries, set the version explicitly via ldflags:
+
+```go
+package main
+
+var version = "dev"
+
+func main() {
+	venom.New(venom.WithVersion(version)).Execute(serve, initProject)
+}
+```
+
+```bash
+go build -ldflags "-X main.version=$(git describe --tags)" .
+```
+
 ## Documentation
 
 - [Allium specification](venom.allium) — formal domain specification
