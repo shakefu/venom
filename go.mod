@@ -1,6 +1,6 @@
 module github.com/shakefu/venom
 
-go 1.27
+go 1.26.0
 
 require (
 	github.com/charmbracelet/fang v1.0.0
